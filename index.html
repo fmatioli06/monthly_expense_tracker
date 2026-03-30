@@ -306,6 +306,41 @@ body {
 }
 .l-input.amt-input  { width: 90px; text-align: right; font-family: 'DM Mono', monospace; font-size: 13px; }
 .l-input.note-input { min-width: 130px; }
+
+/* receipt cell */
+.receipt-cell { display:flex; align-items:center; gap:5px; min-width:110px; }
+.receipt-input {
+  flex:1; min-width:0;
+  padding: 7px 9px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px; color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px; outline: none;
+  transition: all 0.12s;
+}
+.receipt-input:hover  { background: var(--bg); border-color: var(--border2); }
+.receipt-input:focus  { background: #fff; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.receipt-input::placeholder { color: var(--ink-light); font-size:11px; }
+.receipt-view {
+  flex-shrink:0;
+  font-size:11px; font-weight:500;
+  color: var(--accent);
+  text-decoration:none;
+  padding:3px 7px;
+  border-radius:4px;
+  border:1px solid var(--border);
+  background: var(--surface);
+  white-space:nowrap;
+  transition: all 0.12s;
+  line-height:1.4;
+}
+.receipt-view:hover { background: var(--accent-dim); border-color: var(--accent); }
+.receipt-dot {
+  width:6px; height:6px; border-radius:50%;
+  background: var(--accent);
+  flex-shrink:0; display:none;
+}
 select.l-input { appearance: none; -webkit-appearance: none; }
 
 .del-btn {
@@ -726,7 +761,8 @@ select.l-input { appearance: none; -webkit-appearance: none; }
               <th>Description</th>
               <th style="width:165px">Category</th>
               <th style="width:100px;text-align:right">Amount</th>
-              <th style="width:150px">Note</th>
+              <th style="width:120px">Note</th>
+              <th style="width:130px">Receipt</th>
               <th style="width:40px"></th>
             </tr>
           </thead>
@@ -957,9 +993,10 @@ function addRow(init = {}) {
     _id:  id,
     date: init.date || today,
     desc: init.desc || '',
-    cat:  init.cat  || '',
-    amt:  init.amt  != null ? init.amt : '',
-    note: init.note || '',
+    cat:     init.cat     || '',
+    amt:     init.amt     != null ? init.amt : '',
+    note:    init.note    || '',
+    receipt: init.receipt || '',
   });
   renderLedger();
   setTimeout(() => {
@@ -1029,7 +1066,10 @@ function renderLedger() {
     ...CATS.map(c => `<option value="${c.key}">${c.label}</option>`)
   ].join('');
 
-  tbody.innerHTML = currentRows.map(row => `
+  tbody.innerHTML = currentRows.map(row => {
+    const hasReceipt = !!(row.receipt && row.receipt.trim());
+    const receiptUrl = hasReceipt ? escHtml(row.receipt.trim()) : '';
+    return `
     <tr data-id="${row._id}">
       <td class="td-check"><input type="checkbox" class="row-check" onchange="onCheckChange()"></td>
       <td><input class="l-input date-input" type="date" value="${row.date}" onchange="rowChange('${row._id}','date',this.value)"></td>
@@ -1037,8 +1077,16 @@ function renderLedger() {
       <td><select class="l-input cat-input" onchange="rowChange('${row._id}','cat',this.value)">${catOptions}</select></td>
       <td><input class="l-input amt-input" type="number" min="0" step="0.01" placeholder="0.00" value="${row.amt !== '' ? row.amt : ''}" oninput="rowChange('${row._id}','amt',this.value)"></td>
       <td><input class="l-input note-input" type="text" placeholder="Optional note" value="${escHtml(row.note)}" oninput="rowChange('${row._id}','note',this.value)"></td>
+      <td>
+        <div class="receipt-cell">
+          <span class="receipt-dot" style="display:${hasReceipt?'block':'none'}"></span>
+          <input class="receipt-input" type="url" placeholder="Paste link…" value="${receiptUrl}" oninput="rowChange('${row._id}','receipt',this.value)">
+          ${hasReceipt ? `<a class="receipt-view" href="${receiptUrl}" target="_blank" rel="noopener">View</a>` : ''}
+        </div>
+      </td>
       <td><button class="del-btn" onclick="deleteRow('${row._id}')">×</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   currentRows.forEach(row => {
     const sel = tbody.querySelector(`tr[data-id="${row._id}"] .cat-input`);
@@ -1050,6 +1098,30 @@ function rowChange(id, field, val) {
   const row = currentRows.find(r => r._id === id);
   if (!row) return;
   row[field] = field === 'amt' ? (val === '' ? '' : parseFloat(val) || 0) : val;
+  // re-render the receipt cell live so the View link and dot appear/disappear
+  if (field === 'receipt') {
+    const tr = document.querySelector(`tr[data-id="${id}"]`);
+    if (tr) {
+      const hasReceipt = !!(val && val.trim());
+      const url = escHtml(val.trim());
+      const cell = tr.querySelector('.receipt-cell');
+      if (cell) {
+        const dot = cell.querySelector('.receipt-dot');
+        const existingLink = cell.querySelector('.receipt-view');
+        if (dot) dot.style.display = hasReceipt ? 'block' : 'none';
+        if (hasReceipt && !existingLink) {
+          const a = document.createElement('a');
+          a.className = 'receipt-view'; a.target = '_blank'; a.rel = 'noopener';
+          a.href = url; a.textContent = 'View';
+          cell.appendChild(a);
+        } else if (hasReceipt && existingLink) {
+          existingLink.href = url;
+        } else if (!hasReceipt && existingLink) {
+          existingLink.remove();
+        }
+      }
+    }
+  }
   liveUpdate();
 }
 
@@ -1402,6 +1474,7 @@ function parseCSVFile(file) {
     const ci = header.indexOf('category');
     const ai = header.indexOf('amount');
     const ni = header.indexOf('note');
+    const ri = header.indexOf('receipt');
 
     if (di<0||dsi<0||ci<0||ai<0) {
       showToast('⚠ CSV missing required columns (Date, Description, Category, Amount)');
@@ -1415,7 +1488,8 @@ function parseCSVFile(file) {
       const desc     = (r[dsi]||'').trim();
       const catLabel = (r[ci]||'').trim();
       const amt      = parseFloat((r[ai]||'').replace(/[$,]/g,'')) || 0;
-      const note     = ni>=0 ? (r[ni]||'').trim() : '';
+      const note    = ni>=0 ? (r[ni]||'').trim() : '';
+      const receipt = ri>=0 ? (r[ri]||'').trim() : '';
       if (!rawDate || !amt) return;
 
       // normalize date to YYYY-MM-DD regardless of input format
@@ -1435,7 +1509,7 @@ function parseCSVFile(file) {
         }
       }
 
-      pendingImport.push({ date, desc, cat: catKey, amt, note });
+      pendingImport.push({ date, desc, cat: catKey, amt, note, receipt });
     });
 
     const preview = document.getElementById('import-preview');
@@ -1469,12 +1543,13 @@ function confirmImport() {
     if (!key) return;
     if (!data[key]) data[key] = { revenue: 0, rows: [] };
     data[key].rows.push({
-      _id:  makeRowId(),
-      date: row.date,
-      desc: row.desc,
-      cat:  row.cat,
-      amt:  row.amt,
-      note: row.note,
+      _id:     makeRowId(),
+      date:    row.date,
+      desc:    row.desc,
+      cat:     row.cat,
+      amt:     row.amt,
+      note:    row.note,
+      receipt: row.receipt || '',
     });
     count++;
   });
@@ -1527,7 +1602,7 @@ function downloadTemplate() {
 // ── EXPORT ────────────────────────────────────────────────
 function exportCSV() {
   autoSave();
-  const rows = [['Month','Date','Description','Category','Amount','Note','Monthly Revenue','Month Expenses','Net Profit']];
+  const rows = [['Month','Date','Description','Category','Amount','Note','Receipt','Monthly Revenue','Month Expenses','Net Profit']];
   Object.keys(data).sort().forEach(key => {
     const m   = data[key];
     const rev = m.revenue||0;
@@ -1536,7 +1611,7 @@ function exportCSV() {
     const monthLabel = keyToLabel(key);
     (m.rows||[]).forEach(r => {
       const catLabel = CATS.find(c=>c.key===r.cat)?.label || r.cat || '';
-      rows.push([monthLabel,r.date,r.desc,catLabel,r.amt,r.note,rev,exp,profit]);
+      rows.push([monthLabel,r.date,r.desc,catLabel,r.amt,r.note,r.receipt||'',rev,exp,profit]);
     });
     if (!(m.rows||[]).length) rows.push([monthLabel,'','','','','',rev,exp,profit]);
   });
